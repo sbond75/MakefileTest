@@ -6,3 +6,6 @@ all: ./VectorNav/build/bin/libvncxx.a $(OBJS)
 
 ./VectorNav/build/bin/libvncxx.a:
 	cd ./VectorNav && $(MAKE)
+
+clean:
+	rm -f $(OBJS)
