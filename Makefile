@@ -15,7 +15,10 @@ LDFLAGS = ${NIX_LDFLAGS} -L ./VectorNav/build/bin -lvncxx -lpigpio
 
 
 
-all: ./VectorNav/build/bin/libvncxx.a $(OBJS) main.o
+.PHONY: all
+all: a.out
+
+a.out: ./VectorNav/build/bin/libvncxx.a $(OBJS) main.o
 	g++ $^ $(CFLAGS) $(LDFLAGS)
 
 ./VectorNav/build/bin/libvncxx.a:
