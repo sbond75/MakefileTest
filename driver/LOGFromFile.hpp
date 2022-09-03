@@ -5,7 +5,7 @@
 #include "IMU.hpp"
 //#include "LIDAR.hpp"
 //#include "LDS.hpp"
-#include "../src/IMUData.hpp"
+#include "IMUData.hpp"
 #include "LOGBase.hpp"
 
 class LOGFromFile : public LOGBase

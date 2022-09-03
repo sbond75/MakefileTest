@@ -1,0 +1,174 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 383c445..cb2e244 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -5,7 +5,7 @@ project(pigpio LANGUAGES C VERSION 0.71)
+ list (APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
+ 
+ find_package(Threads REQUIRED)
+-find_package(RT REQUIRED)
++#find_package(RT REQUIRED)
+ 
+ option(BUILD_SHARED_LIBS "Create shared libraries" ON)
+ 
+@@ -22,19 +22,19 @@ add_library(pigpiod_if2 pigpiod_if2.c command.c)
+ 
+ # x_pigpio
+ add_executable(x_pigpio x_pigpio.c)
+-target_link_libraries(x_pigpio pigpio RT::RT Threads::Threads)
++target_link_libraries(x_pigpio pigpio Threads::Threads)
+ 
+ # x_pigpiod_if
+ add_executable(x_pigpiod_if x_pigpiod_if.c)
+-target_link_libraries(x_pigpiod_if pigpiod_if RT::RT Threads::Threads)
++target_link_libraries(x_pigpiod_if pigpiod_if Threads::Threads)
+ 
+ # x_pigpiod_if2
+ add_executable(x_pigpiod_if2 x_pigpiod_if2.c)
+-target_link_libraries(x_pigpiod_if2 pigpiod_if2 RT::RT Threads::Threads)
++target_link_libraries(x_pigpiod_if2 pigpiod_if2 Threads::Threads)
+ 
+ # pigpiod
+ add_executable(pigpiod pigpiod.c)
+-target_link_libraries(pigpiod pigpio RT::RT Threads::Threads)
++target_link_libraries(pigpiod pigpio Threads::Threads)
+ 
+ # pigs
+ add_executable(pigs pigs.c command.c)
+@@ -44,6 +44,12 @@ target_link_libraries(pigs Threads::Threads)
+ add_executable(pig2vcd pig2vcd.c command.c)
+ target_link_libraries(pig2vcd Threads::Threads)
+ 
++target_link_libraries(pigpio PosixMachTiming)
++target_link_libraries(pig2vcd PosixMachTiming)
++target_link_libraries(pigs PosixMachTiming)
++target_link_libraries(pigpiod_if PosixMachTiming)
++target_link_libraries(pigpiod_if2 PosixMachTiming)
++
+ # Configure and install project
+ 
+ include (GenerateExportHeader)
+@@ -124,4 +130,4 @@ endif()
+ 
+ # package project
+ 
+-include (CPack)
+\ No newline at end of file
++include (CPack)
+diff --git a/pigpio.c b/pigpio.c
+index 97bfc54..f9e1ea6 100644
+--- a/pigpio.c
++++ b/pigpio.c
+@@ -31,6 +31,8 @@ For more information, please refer to <http://unlicense.org/>
+ 
+ #define _GNU_SOURCE
+ 
++#include <PosixMachTiming/timing_mach.h>
++
+ #include <stdio.h>
+ #include <string.h>
+ #include <strings.h>
+@@ -56,7 +58,8 @@ For more information, please refer to <http://unlicense.org/>
+ #include <sys/stat.h>
+ #include <sys/file.h>
+ #include <sys/socket.h>
+-#include <sys/sysmacros.h>
++//#include <sys/mman.h> //#include <sys/sysmacros.h>
++#define MAP_LOCKED 0 // HACK, although "The MAP_LOCKED flag is ignored in older kernels." ( https://man7.org/linux/man-pages/man2/munmap.2.html )
+ #include <netinet/tcp.h>
+ #include <arpa/inet.h>
+ #include <sys/select.h>
+@@ -1681,7 +1684,7 @@ static void myGpioSleep(int seconds, int micros)
+    ts.tv_sec  = seconds;
+    ts.tv_nsec = micros * 1000;
+ 
+-   while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++   while (clock_nanosleep_rel(CLOCK_REALTIME, 0, &ts, &rem))
+    {
+       /* copy remaining time to ts */
+       ts = rem;
+@@ -8339,8 +8342,8 @@ int initInitialise(void)
+ 
+    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
+ 
+-   if (gpioCfg.internals & PI_CFG_RT_PRIORITY)
+-      sched_setscheduler(0, SCHED_FIFO, &param);
++   /* if (gpioCfg.internals & PI_CFG_RT_PRIORITY) */
++   /*    sched_setscheduler(0, SCHED_FIFO, &param); */
+ 
+    initClock(1); /* initialise main clock */
+ 
+@@ -8596,7 +8599,7 @@ void time_sleep(double seconds)
+       ts.tv_sec = seconds;
+       ts.tv_nsec = (seconds-(double)ts.tv_sec) * 1E9;
+ 
+-      while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++      while (clock_nanosleep_rel(CLOCK_REALTIME, 0, &ts, &rem))
+       {
+          /* copy remaining time to ts */
+          ts.tv_sec  = rem.tv_sec;
+@@ -12041,7 +12044,7 @@ int gpioNotifyOpenWithSize(int bufSize)
+ 
+    if (bufSize != 0)
+    {
+-      i = fcntl(fd, F_SETPIPE_SZ, bufSize);
++      i = -1; // <-- always fail      //fcntl(fd, F_SETPIPE_SZ, bufSize);
+       if (i != bufSize)
+       {
+          gpioNotify[slot].state = PI_NOTIFY_CLOSED;
+@@ -13628,11 +13631,13 @@ int gpioSleep(unsigned timetype, int seconds, int micros)
+ 
+    if (timetype == PI_TIME_ABSOLUTE)
+    {
+-      while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, &rem));
++      //while (clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, &rem));
++      while (clock_nanosleep_abstime(&ts, &rem)); // Note: may use CLOCK_MONOTONIC instead of CLOCK_REALTIME ( https://github.com/ChisholmKyle/PosixMachTiming/blob/master/src/timing_mach.h under `clock_nanosleep_abstime` )
+    }
+    else
+    {
+-      while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++      //while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++      while (nanosleep(&ts, &rem)) // "Calling clock_nanosleep() with the value TIMER_ABSTIME not set in the flags argument and with a clock_id of CLOCK_REALTIME is equivalent to calling nanosleep() with the same rqtp and rmtp arguments." ( https://pubs.opengroup.org/onlinepubs/009604599/functions/nanosleep.html )
+       {
+          /* copy remaining time to ts */
+          ts.tv_sec  = rem.tv_sec;
+diff --git a/pigpio.h b/pigpio.h
+index 1b8e51c..f3c12d0 100644
+--- a/pigpio.h
++++ b/pigpio.h
+@@ -31,6 +31,9 @@ For more information, please refer to <http://unlicense.org/>
+ #include <stdint.h>
+ #include <pthread.h>
+ 
++#define clock_nanosleep(clockid, flags, request, remain) clock_nanosleep_abstime(request, remain) // Note: may use CLOCK_MONOTONIC instead of CLOCK_REALTIME ( https://github.com/ChisholmKyle/PosixMachTiming/blob/master/src/timing_mach.h under `clock_nanosleep_abstime` )
++#define clock_nanosleep_rel(clockid, flags, request, remain) nanosleep(request, remain) // "Calling clock_nanosleep() with the value TIMER_ABSTIME not set in the flags argument and with a clock_id of CLOCK_REALTIME is equivalent to calling nanosleep() with the same rqtp and rmtp arguments." ( https://pubs.opengroup.org/onlinepubs/009604599/functions/nanosleep.html )
++
+ #define PIGPIO_VERSION 79
+ 
+ /*TEXT
+diff --git a/pigpiod_if.c b/pigpiod_if.c
+index c62b3e8..9e25d57 100644
+--- a/pigpiod_if.c
++++ b/pigpiod_if.c
+@@ -398,7 +398,7 @@ void time_sleep(double seconds)
+       ts.tv_sec = seconds;
+       ts.tv_nsec = (seconds-(double)ts.tv_sec) * 1E9;
+ 
+-      while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++      while (clock_nanosleep_rel(CLOCK_REALTIME, 0, &ts, &rem))
+       {
+          /* copy remaining time to ts */
+          ts.tv_sec  = rem.tv_sec;
+diff --git a/pigpiod_if2.c b/pigpiod_if2.c
+index f8dc9c7..f50c101 100644
+--- a/pigpiod_if2.c
++++ b/pigpiod_if2.c
+@@ -588,7 +588,7 @@ void time_sleep(double seconds)
+       ts.tv_sec = seconds;
+       ts.tv_nsec = (seconds-(double)ts.tv_sec) * 1E9;
+ 
+-      while (clock_nanosleep(CLOCK_REALTIME, 0, &ts, &rem))
++      while (clock_nanosleep_rel(CLOCK_REALTIME, 0, &ts, &rem))
+       {
+          /* copy remaining time to ts */
+          ts.tv_sec  = rem.tv_sec;
